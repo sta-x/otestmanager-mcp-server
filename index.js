@@ -199,6 +199,28 @@ if (ACCOUNT_KEY) {
   );
 }
 
+// The guide's version, printed at the top of every answer, so a script can be traced to the rules
+// it was written under when comparing results across guide changes (issue 013).
+// 2026-11-17: page readiness rules (PAGE_READINESS) for browser scripts.
+const SCRIPT_GUIDE_VERSION = '2026-11-17';
+
+// Page readiness: a script that acts before the page is really ready fails on timing, not on the
+// product, and passes or fails from run to run. Shared by every browser kind below.
+const PAGE_READINESS =
+  '### 페이지 준비 대기 (브라우저 스크립트 공통 — 반드시 지킬 것)\n' +
+  '**탐색 완료 ≠ 앱 준비 ≠ 요소 조작 가능**입니다. `page.goto`/`driver.get`이 돌아왔다고(load·DOMContentLoaded) 비동기로 오는 데이터·화면이 준비된 것이 아닙니다. ' +
+  '동작하거나 값을 읽기 전에 그 화면의 **실제 준비 신호**를 기다리세요:\n' +
+  '1. 예상한 URL(경로)에 와 있는지 — 로그인 페이지나 오류 페이지로 튕기지 않았는지.\n' +
+  '2. 로딩 표시(스피너·스켈레톤·"불러오는 중")가 사라졌는지 — 단, **로딩이 끝났다는 것만으로 정상 화면이라고 보지 마세요**. 오류 화면도 로딩은 끝납니다.\n' +
+  '3. 필요한 정상 콘텐츠가 있는지 — 다룰 데이터 행·필드·제목이 보이는지(예: 목록의 첫 행, 상품명, 금액).\n' +
+  '4. 누를 버튼·입력란이 보이고 활성화(enabled)됐는지.\n' +
+  '5. 대신 오류 상태(오류 메시지·토스트·빈 결과 안내·권한 없음)가 보이면 기다리지 말고 그 문구를 출력하고 실패로 끝내세요.\n' +
+  '**금지:** 고정 대기(`waitForTimeout`, `time.sleep`, `setTimeout`)로 준비를 대신하기, `networkidle` 하나만으로 모든 페이지의 완료를 판단하기(폴링·웹소켓·분석 스크립트가 있으면 끝나지 않거나, 데이터보다 먼저 끝남).\n' +
+  '**모든 대기에는 명시적 제한 시간**을 두고(예: 15초), 실패하면 **무엇을 기다렸는지**를 메시지에 남기세요(예: `"주문 목록 첫 행(#orders tr) 15초 안에 안 보임; 현재 URL=..."`). ' +
+  '무한 대기는 실행 제한 시간까지 아무 정보 없이 끝납니다.\n' +
+  'DOM을 직접 보고(브라우저 도구·스냅샷) 셀렉터와 준비 신호를 골랐다면 그대로 쓰고, 보지 못하고 추정했다면 스크립트 주석에 `// 추정: <무엇>`으로 남기세요.\n' +
+  '대기 시간을 늘리는 것으로 만료된 URL·권한 오류·잘못된 셀렉터는 해결되지 않습니다 — 그런 실패는 원인을 출력하고 끝내야 합니다.\n';
+
 // Returned by get_automation_script_guide — OTM Companion, which actually executes these
 // scripts, lives in a separate repo the external LLM client can't read, so these conventions
 // and examples are duplicated here rather than assumed knowledge.
@@ -225,6 +247,8 @@ const SCRIPT_GUIDES = {
     '결과(Pass/Fail, 로그, 아티팩트)를 가져올 수 있습니다. NODE_TS는 모든 OTM Companion이 실행하고, ' +
     'JMeter·Postman·Appium·OWASP ZAP은 그 도구를 설치한 컴패니언만 실행합니다(list_companions의 capabilities로 ' +
     '확인; 없는 컴패니언에는 실행을 보내지 않습니다).\n\n' +
+    '**브라우저 스크립트(Playwright·Selenium·데이터셋)는 동작 전에 페이지의 실제 준비 신호(예상 URL, 로딩 종료 + 정상 콘텐츠, 필요한 행·필드, 활성화된 버튼)를 ' +
+    '제한 시간과 함께 기다려야 합니다** — 고정 sleep·networkidle 단독 금지. 자세한 규칙은 종류별 가이드의 "페이지 준비 대기".\n\n' +
     '**실패할 때는 기대값과 실제로 본 값을 둘 다 출력하세요** (예: `expected: "3단계" / observed: "3단계 (401kWh 이상)"`, ' +
     '화면에 오류가 보였다면 그 오류 문구도). 어설션이 "실패"만 남기면 결과 분석에서 스크립트 문제(셀렉터·대기)인지 제품 결함인지 ' +
     '가릴 수 없습니다 — 단언 라이브러리의 메시지에 값이 안 나오면 실패 직전에 console.log로 남기세요.\n\n' +
@@ -261,11 +285,14 @@ const SCRIPT_GUIDES = {
     'const browser = await chromium.launch({ headless });\n' +
     'const page = await browser.newPage();\n' +
     'try {\n' +
-    '  await page.goto(`${process.env.OTM_VAR_BASE_URL}/products/${row.sku}`, { waitUntil: \'networkidle\' });\n' +
-    "  const name = (await page.locator('h1.product-title').textContent())?.trim() ?? null;\n" +
-    "  // 결과 대신 오류 상태가 보이면 관측하지 않고 행 ERROR (오류가 이 행의 기대값이면 관측값으로 출력)\n" +
+    '  await page.goto(`${process.env.OTM_VAR_BASE_URL}/products/${row.sku}`);\n' +
+    "  // 준비 신호: 상품명(정상) 또는 오류 표시 중 먼저 보이는 것 - networkidle·고정 sleep으로 대신하지 않기\n" +
+    "  const title = page.locator('h1.product-title');\n" +
     "  const pageError = page.locator('.error-message');\n" +
+    "  await title.or(pageError).first().waitFor({ timeout: 15_000 }).catch(() => { throw new Error(`상품명도 오류 표시도 15초 안에 안 보임; URL=${page.url()}`); });\n" +
+    "  // 결과 대신 오류 상태가 보이면 관측하지 않고 행 ERROR (오류가 이 행의 기대값이면 관측값으로 출력)\n" +
     "  if (await pageError.count()) throw new Error('화면 오류 상태: ' + (await pageError.first().innerText()).trim());\n" +
+    "  const name = (await title.textContent())?.trim() ?? null;\n" +
     "  const price = (await page.locator('.price').first().textContent())?.trim() ?? null;\n" +
     "  const img = page.locator('.gallery img').first();\n" +
     "  const image = (await img.count()) ? {\n" +
@@ -301,6 +328,7 @@ const SCRIPT_GUIDES = {
     '  if (statePath) await context.storageState({ path: statePath });\n' +
     '}\n' +
     '```\n' +
+    PAGE_READINESS + '\n' +
     '데이터셋의 열 정의(key, kind, compare)는 get_case_dataset으로 확인하고, 행별 결과는 list_run_iterations로, 검토 대기 행은 review_iteration으로 처리합니다.',
   NODE_TS:
     '## NODE_TS (.ts) — Node.js / Playwright / Appium\n\n' +
@@ -331,12 +359,20 @@ const SCRIPT_GUIDES = {
     'const page = await context.newPage();\n\n' +
     'try {\n' +
     '  // 주소·계정은 값 대신 변수로 (OTM Companion이 OTM_VAR_* 로 주입)\n' +
-    '  await page.goto(process.env.OTM_VAR_BASE_URL!);\n' +
+    "  await page.goto(process.env.OTM_VAR_BASE_URL! + '/login');\n" +
+    '  // 준비 신호: 로그인 버튼이 보일 때까지 (제한 시간 + 무엇을 기다렸는지)\n' +
+    "  const submit = page.getByRole('button', { name: '로그인' });\n" +
+    "  await submit.waitFor({ state: 'visible', timeout: 15_000 }).catch(() => { throw new Error(`로그인 버튼이 15초 안에 안 보임; URL=${page.url()}`); });\n" +
     "  await page.fill('#username', process.env.OTM_VAR_ADMIN_USERNAME!);\n" +
     "  await page.fill('#password', process.env.OTM_VAR_ADMIN_PASSWORD!);\n" +
-    "  await page.click('text=로그인');\n" +
-    "  await page.waitForURL('**/dashboard');\n" +
-    "  console.log('PASS: 로그인 후 대시보드로 정상 이동했습니다.');\n" +
+    '  await submit.click();\n' +
+    '  // 이동 완료 ≠ 화면 준비: URL을 확인한 뒤, 정상 콘텐츠와 오류 표시 중 먼저 보이는 것\n' +
+    "  await page.waitForURL('**/dashboard', { timeout: 15_000 }).catch(() => { throw new Error(`15초 안에 /dashboard로 가지 않음; URL=${page.url()}`); });\n" +
+    "  const ready = page.locator('[data-testid=dashboard-summary]'); // 추정: 대시보드의 데이터 영역\n" +
+    "  const failed = page.locator('.error-message, [role=alert]');\n" +
+    "  await ready.or(failed).first().waitFor({ timeout: 15_000 }).catch(() => { throw new Error('대시보드 요약도 오류 표시도 15초 안에 안 보임'); });\n" +
+    "  if (await failed.count()) throw new Error('화면 오류: ' + (await failed.first().innerText()).trim());\n" +
+    "  console.log('PASS: 로그인 후 대시보드가 데이터와 함께 표시됐습니다.');\n" +
     '} catch (err) {\n' +
     "  await page.screenshot({ path: 'failure.png' }); // 자동으로 아티팩트 첨부됨\n" +
     "  console.error('FAIL:', err.message);\n" +
@@ -346,6 +382,9 @@ const SCRIPT_GUIDES = {
     '  await browser.close();\n' +
     '}\n' +
     '```\n\n' +
+    PAGE_READINESS +
+    'Playwright에서는 `locator.waitFor({ state, timeout })`과 `page.waitForURL(url, { timeout })`을 쓰고, 정상/오류 중 먼저 오는 것은 ' +
+    '`locator.or()`로 기다린 뒤 분기하세요. 이동만 확인할 때도 `waitUntil: \'networkidle\'` 대신 그 화면의 준비 신호를 기다립니다.\n\n' +
     '### Appium (모바일 앱, webdriverio)\n' +
     'Appium을 설치한 OTM Companion이 실행합니다: `import ... from \'webdriverio\'`가 있는 스크립트면 컴패니언이 Appium ' +
     '서버(UiAutomator2 드라이버 포함)를 먼저 띄우고, 주소는 OTM_APPIUM_HOST/OTM_APPIUM_PORT 환경변수로 줍니다. ' +
@@ -529,19 +568,33 @@ const SCRIPT_GUIDES = {
     '    options.add_argument("--headless=new")\n' +
     'driver = webdriver.Chrome(options=options)\n' +
     'try:\n' +
+    '    wait = WebDriverWait(driver, 15)  # 모든 대기에 제한 시간\n' +
     '    driver.get(BASE_URL + "/login")\n' +
+    '    # 준비 신호: 로그인 버튼이 누를 수 있게 될 때까지 - time.sleep으로 대신하지 않기\n' +
+    '    submit = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button[type=submit]")), "로그인 버튼이 15초 안에 누를 수 있게 되지 않음")\n' +
     '    driver.find_element(By.NAME, "username").send_keys(os.environ["OTM_VAR_ADMIN_USERNAME"])\n' +
     '    driver.find_element(By.NAME, "password").send_keys(os.environ["OTM_VAR_ADMIN_PASSWORD"])\n' +
-    '    driver.find_element(By.CSS_SELECTOR, "button[type=submit]").click()\n' +
-    '    WebDriverWait(driver, 10).until(EC.url_contains("/dashboard"))\n' +
-    '    print("PASS: 로그인 후 대시보드로 정상 이동했습니다.")\n' +
+    '    submit.click()\n' +
+    '    wait.until(EC.url_contains("/dashboard"), "15초 안에 /dashboard로 가지 않음")\n' +
+    '    # 이동 완료 ≠ 화면 준비: 정상 콘텐츠와 오류 표시 중 먼저 보이는 것\n' +
+    '    found = wait.until(EC.any_of(\n' +
+    '        EC.visibility_of_element_located((By.CSS_SELECTOR, "[data-testid=dashboard-summary]")),  # 추정: 대시보드의 데이터 영역\n' +
+    '        EC.visibility_of_element_located((By.CSS_SELECTOR, ".error-message, [role=alert]")),\n' +
+    '    ), "대시보드 요약도 오류 표시도 15초 안에 안 보임")\n' +
+    '    errors = driver.find_elements(By.CSS_SELECTOR, ".error-message, [role=alert]")\n' +
+    '    if errors and errors[0].is_displayed():\n' +
+    '        raise AssertionError("화면 오류: " + errors[0].text.strip())\n' +
+    '    print("PASS: 로그인 후 대시보드가 데이터와 함께 표시됐습니다.")\n' +
     'except Exception as err:\n' +
     '    driver.save_screenshot("failure.png")  # 자동으로 아티팩트 첨부됨\n' +
     '    print("FAIL:", err)\n' +
     '    raise\n' +
     'finally:\n' +
     '    driver.quit()\n' +
-    '```',
+    '```\n\n' +
+    PAGE_READINESS +
+    'Selenium에서는 `WebDriverWait(driver, 초).until(조건, "무엇을 기다렸는지")`로 기다리고, 정상/오류 중 먼저 오는 것은 `EC.any_of(...)`로 기다린 뒤 분기하세요. ' +
+    '`implicitly_wait`와 `WebDriverWait`를 섞지 마세요(대기 시간이 예측할 수 없게 늘어납니다).',
 };
 
 server.registerTool(
@@ -1105,7 +1158,8 @@ server.registerTool(
       kind: z.enum(['NODE_TS', 'JMETER', 'POSTMAN', 'PYTHON', 'DATASET']).optional().describe('가이드를 볼 스크립트 종류 (생략 시 전체 개요). DATASET=데이터셋이 붙은 케이스의 행 실행 규칙'),
     },
   },
-  async ({ kind }) => textResult(kind ? SCRIPT_GUIDES[kind] : SCRIPT_GUIDES.OVERVIEW)
+  async ({ kind }) =>
+    textResult(`(automation script guide ${SCRIPT_GUIDE_VERSION})\n\n` + (kind ? SCRIPT_GUIDES[kind] : SCRIPT_GUIDES.OVERVIEW))
 );
 
 server.registerTool(
