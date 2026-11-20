@@ -127,7 +127,7 @@ curl -H "X-Api-Key: otm_u_xxx" https://<서버>/api/v1/projects/<ID 또는 코�
 | `create_test_case` | 새 테스트 케이스를 이 프로젝트에 생성. `category`를 지정하면 이 프로젝트의 폴더 트리에서 그 이름의 하위 폴더에 담김(같은 이름 재사용 시 같은 폴더로 모임, 없으면 자동 생성) — 생략하면 최상위에 바로 담김. `requirementIds`를 지정하면 생성과 동시에 해당 요구사항(들)과 매칭됨(프로젝트 레벨). ID는 `<프로젝트코드>-TC-00001` 형식(5자리)으로 자동 채번 |
 | `get_test_case` | 테스트 케이스 하나의 전체 상세 조회 (첨부된 자동화 스크립트 원문, 속한 폴더 `folderId`, 덮어쓰기 방지용 `version`·`automationScriptVersion` 포함, 스크립트가 없으면 `automationScriptKind`는 null) |
 | `update_test_case` | 테스트 케이스의 제목/목적/사전조건/입력값/기대결과/우선순위/스텝 수정 (전달한 필드만 변경, 수정 전 내용은 버전 이력으로 보존). `folderId`(list_folders의 ID, `null`이면 최상위) 또는 `category`(최상위 폴더 이름, 없으면 생성; 둘 다 주면 `folderId` 우선)로 다른 폴더로 옮길 수도 있음 — 옮기기만 하면 버전은 그대로. `expectedVersion`(get_test_case의 `version`)을 주면 그 사이 바뀌었을 때 아무것도 쓰지 않고 409(`code: CONFLICT`, `currentVersion`·`currentScriptVersion`) |
-| `get_automation_script_guide` | 스크립트 작성 전 참고할 가이드 — kind별(NODE_TS/JMETER/POSTMAN/PYTHON/DATASET — DATASET은 데이터셋이 붙은 케이스의 행 실행 규칙) 작성 규칙 + 실제 동작하는 예시 스크립트 |
+| `get_automation_script_guide` | 스크립트 작성 전 참고할 가이드 — kind별(NODE_TS/JMETER/POSTMAN/PYTHON/DATASET — DATASET은 데이터셋이 붙은 케이스의 행 실행 규칙) 작성 규칙 + 실제 동작하는 예시 스크립트. 브라우저 스크립트(Playwright·Selenium·데이터셋)에는 공통 "페이지 준비 대기" 규칙(예상 URL·로딩 종료와 정상 콘텐츠·활성화된 버튼을 제한 시간과 함께 기다리기, 고정 sleep·`networkidle` 단독 금지)이 들어 있고, 답의 첫 줄에 가이드 버전(예: `automation script guide 2026-11-17`)이 붙어 어느 규칙으로 쓴 스크립트인지 추적할 수 있음 |
 | `attach_automation_script` | 테스트 케이스에 자동화 스크립트 첨부/교체(=수정) — 파일 확장자로 종류 자동 판별 (.ts: Node.js/Playwright/Appium/OWASP ZAP, .jmx: JMeter, .json: Postman/Newman, .py: Python/Selenium — 모두 OTM Companion이 실행하며, 그 도구를 설치한 컴패니언에만 보냄). 실제 저장 파일명은 전달한 fileName을 그대로 쓰지 않고 케이스 ID·제목 기반으로 서버가 재생성함(fileName은 확장자 판별 용도). content 맨 앞에 실제 엔진(Playwright/Appium/OWASP ZAP/Node.js/JMeter/Postman/Selenium)을 표시하는 주석(.ts/.jmx/.py) 또는 info.description(.json)을 반드시 포함해야 함. 이전 스크립트는 버전 이력으로 보관. `steps`를 함께 넘기면 케이스의 텍스트 스텝도 갱신(이때 케이스 버전 이력도 남음). `expectedVersion`(get_test_case의 `automationScriptVersion`)과, steps를 바꿀 때 `expectedCaseVersion`(케이스 `version`)을 주면 그 사이 바뀌었을 때 409 `CONFLICT` |
 | `remove_automation_script` | 테스트 케이스의 자동화 스크립트 제거 (마찬가지로 버전 이력에 보관) |
 | `list_automation_script_versions` | 자동화 스크립트 이전 버전 이력 조회 |
@@ -175,7 +175,7 @@ API 키로 직접 기록한 실행 결과·결함에는 "🔑 (키 이름)" 배�
 
 로그인이 필요한 사이트의 스크립트에는 계정·주소를 값으로 적지 말고 `process.env.OTM_VAR_<키>`(JMeter
 `${__P(키)}`, Postman `{{키}}`, Python `os.environ["OTM_VAR_<키>"]`)로 참조하세요. 값은 서버에 없고, 실행하는 사람 PC의 OTM Companion이
-자기 "테스트 계정"에서 주입합니다. 각 컴패니언이 가진 키 이름은 `list_companions`의 `testValueKeys`로
+자기 **테스트 변수**(프로젝트마다 고른 변수 세트)에서 주입합니다. 각 컴패니언이 가진 키 이름은 `list_companions`의 `testValueKeys`로
 확인합니다 — 규칙 전체는 `get_automation_script_guide`와 OTestManager 메인 README 참고(이 폴더는 공개
 저장소로 미러링되므로 상대 경로 링크는 걸지 않습니다).
 
